@@ -1,0 +1,244 @@
+version: '3.8'
+
+x-airflow-common:
+  &airflow-common
+  image: apache/airflow:2.8.1
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres-airflow:5432/airflow
+    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+    AIRFLOW__CORE__FERNET_KEY: 'Zp3fB8vK9mN2qR5tY8wC1eH4jL7nP0sU6xA3dF6gI9='
+    AIRFLOW__WEBSERVER__SECRET_KEY: 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6'
+    AIRFLOW__WEBSERVER__SESSION_LIFETIME_MINUTES: '43200'
+    AIRFLOW__WEBSERVER__COOKIE_SECURE: 'False'
+    AIRFLOW__WEBSERVER__COOKIE_SAMESITE: 'Lax'
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    _PIP_ADDITIONAL_REQUIREMENTS: ''
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+    - ./scripts/airflow:/opt/airflow/scripts
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    &airflow-common-depends-on
+    redis:
+      condition: service_healthy
+    postgres-airflow:
+      condition: service_healthy
+
+services:
+  # Main PostgreSQL database for data
+  postgres-data:
+    image: postgres:15
+    container_name: postgres-data
+    environment:
+      POSTGRES_USER: datauser
+      POSTGRES_PASSWORD: datapass
+      POSTGRES_DB: datauser
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data-volume:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "datauser", "-d", "datauser"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  # PostgreSQL for Airflow metadata
+  postgres-airflow:
+    image: postgres:15
+    container_name: postgres-airflow
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-airflow-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  # Redis for Celery broker
+  redis:
+    image: redis:7.2
+    container_name: redis
+    expose:
+      - 6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 30s
+      retries: 50
+      start_period: 30s
+    restart: always
+
+  # Airflow webserver
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    command:
+      - bash
+      - -c
+      - |
+        /opt/airflow/scripts/init-connections.sh
+        exec airflow webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # Airflow scheduler
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # Airflow worker
+  airflow-worker:
+    <<: *airflow-common
+    container_name: airflow-worker
+    command: celery worker
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - 'celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}" || celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    environment:
+      <<: *airflow-common-env
+      DUMB_INIT_SETSID: "0"
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # Airflow triggerer
+  airflow-triggerer:
+    <<: *airflow-common
+    container_name: airflow-triggerer
+    command: triggerer
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # Airflow initialization
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /sources/logs /sources/dags /sources/plugins
+        chown -R "${AIRFLOW_UID:-50000}:0" /sources/logs /sources/plugins
+        chmod -R 755 /sources/dags
+        exec /entrypoint airflow version
+        airflow db init
+        airflow users create \
+          --username admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com \
+          --password admin
+        # Add PostgreSQL connection
+        airflow connections add 'postgres_data' \
+          --conn-type 'postgres' \
+          --conn-login 'datauser' \
+          --conn-password 'datapass' \
+          --conn-host 'postgres-data' \
+          --conn-port '5432' \
+          --conn-schema 'datauser' || echo "Connection already exists"
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: admin
+    user: "0:0"
+    volumes:
+      - ./:/sources
+
+  # Superset
+  superset:
+    image: apache/superset:3.0.0
+    container_name: superset
+    environment:
+      - SUPERSET_SECRET_KEY=thisISaSECRET_1234567890abcdefghijklmnopqrstuvwxyz
+      - SUPERSET_WEBSERVER_TIMEOUT=300
+      - WTF_CSRF_ENABLED=True
+      - WTF_CSRF_TIME_LIMIT=None
+      - PERMANENT_SESSION_LIFETIME=43200
+    ports:
+      - "8088:8088"
+    volumes:
+      - superset-home:/app/superset_home
+      - ./scripts:/app/docker/scripts
+    command:
+      - /bin/bash
+      - -c
+      - |
+        pip install psycopg2-binary
+        superset db upgrade
+        superset fab create-admin --username admin --firstname Admin --lastname User --email admin@example.com --password admin || true
+        superset init
+        bash /app/docker/scripts/superset/init-database.sh
+        exec /usr/bin/run-server.sh
+    depends_on:
+      postgres-data:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8088/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  postgres-data-volume:
+  postgres-airflow-volume:
+  superset-home:

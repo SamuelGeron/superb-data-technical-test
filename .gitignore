@@ -1,0 +1,40 @@
+# Airflow
+logs/*
+!logs/.gitkeep
+airflow.db
+airflow.cfg
+webserver_config.py
+*.pid
+*.err
+*.log
+
+# Superset
+superset.db
+superset_config.py
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes (data persists in named volumes)
+postgres-data/
