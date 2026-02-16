@@ -9,13 +9,14 @@ x-airflow-common:
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres-airflow:5432/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
-    AIRFLOW__CORE__FERNET_KEY: 'Zp3fB8vK9mN2qR5tY8wC1eH4jL7nP0sU6xA3dF6gI9='
+    AIRFLOW__CORE__FERNET_KEY: 'rKHtG_sTNRfW01vjMNGMr9aDygLSSLZk_OOyqrsOIvQ='
     AIRFLOW__WEBSERVER__SECRET_KEY: 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6'
     AIRFLOW__WEBSERVER__SESSION_LIFETIME_MINUTES: '43200'
     AIRFLOW__WEBSERVER__COOKIE_SECURE: 'False'
     AIRFLOW__WEBSERVER__COOKIE_SAMESITE: 'Lax'
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS: 'true'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     _PIP_ADDITIONAL_REQUIREMENTS: ''
@@ -173,7 +174,6 @@ services:
         mkdir -p /sources/logs /sources/dags /sources/plugins
         chown -R "${AIRFLOW_UID:-50000}:0" /sources/logs /sources/plugins
         chmod -R 755 /sources/dags
-        exec /entrypoint airflow version
         airflow db init
         airflow users create \
           --username admin \
@@ -190,13 +190,13 @@ services:
           --conn-host 'postgres-data' \
           --conn-port '5432' \
           --conn-schema 'datauser' || echo "Connection already exists"
+        exec /entrypoint airflow version
     environment:
       <<: *airflow-common-env
       _AIRFLOW_DB_MIGRATE: 'true'
       _AIRFLOW_WWW_USER_CREATE: 'true'
       _AIRFLOW_WWW_USER_USERNAME: admin
       _AIRFLOW_WWW_USER_PASSWORD: admin
-    user: "0:0"
     volumes:
       - ./:/sources
 

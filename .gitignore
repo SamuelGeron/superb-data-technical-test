@@ -26,6 +26,9 @@ build/
 .env.local
 .env.*.local
 
+# Pythion venv
+.venv*
+
 # IDE
 .vscode/
 *.swp
