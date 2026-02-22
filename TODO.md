@@ -16,6 +16,9 @@
 - [ ] Create tests
 - [ ] Improve documentation on what each task does
 - [ ] Create step to capture list of items that are on risk based on predicted sales and current stock
+- [x] Create subfolders for DAG config and SQL templates
+- [x] Refactor DAG using decorators
+- [x] Create Helpers for both Postgres connection and SQL template render
 
 
 ## Quick commands

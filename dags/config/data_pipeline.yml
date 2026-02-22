@@ -1,0 +1,27 @@
+# Configuration for the data pipeline DAG
+dag_id: data_pipeline
+description: Main pipeline for creating the datasets used later in Superset
+tags: ['data_pipeline', 'analytics']
+start_date: '2024-01-20'
+schedule: '0 7 * * *' # @daily at 7AM
+catchup: false
+is_paused_upon_creation: true
+max_active_runs: 1
+
+default_args:
+  owner: airflow
+  depends_on_past: false
+  email_on_failure: false
+  email_on_retry: false
+  retries: 0
+  retry_delay_mins: 5
+
+params:
+  full_refresh: false
+
+vars:
+  postgres_conn_id: 'postgres_data'
+  source_schema: 'public'
+  target_schema: 'analytics'
+  incremental_range_in_days: 3
+  predictions_for_next_n_days: 30
